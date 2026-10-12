@@ -38,12 +38,20 @@ window.HOLIDAY_DATA = {
   // 탭별 기본 종목입니다. 위젯의 설정 › 시세 종목에서 추가·삭제하면 그 목록을 따로 저장해서 씁니다.
   quotes: {
     tabs: [
-      { id:"all", name:"전체", items:["SAMSUNG","SKHYNIX","HYUNDAI","NAVER","LGELECTRONICS","HANMI","SAMSUNGEM","KODEX200","SPY","QQQ","EWJ"],
-        note:"다우·니케이225·상해종합은 바이낸스에 없음" },
-      { id:"kr",  name:"한국", items:["SAMSUNG","SKHYNIX","HYUNDAI","NAVER","LGELECTRONICS","HANMI","SAMSUNGEM","KODEX200","EWY"] },
-      { id:"us",  name:"미국", items:["SPY","QQQ","IWM","SMH","NVDA","AAPL","MSFT","AMZN","GOOGL","META","TSLA"] },
-      { id:"jp",  name:"일본", items:["EWJ","SONY"], note:"일본 종목은 EWJ·소니뿐 (니케이225 없음)" }
+      // '@'로 시작하는 것은 지수 선물(아래 indices), 나머지는 바이낸스 무기한 선물 기호
+      { id:"all", name:"전체", items:["@KR200","@US30","@NDX","@SPX","@N225","SAMSUNG","SKHYNIX","HYUNDAI","NAVER","LGELECTRONICS","HANMI","SAMSUNGEM"] },
+      { id:"kr",  name:"한국", items:["@KR200","SAMSUNG","SKHYNIX","HYUNDAI","NAVER","LGELECTRONICS","HANMI","SAMSUNGEM","KODEX200","EWY"] },
+      { id:"us",  name:"미국", items:["@US30","@NDX","@SPX","SPY","QQQ","IWM","SMH","NVDA","AAPL","MSFT","AMZN","GOOGL","META","TSLA"] },
+      { id:"jp",  name:"일본", items:["@N225","EWJ","SONY"], note:"일본 종목은 EWJ·소니뿐" }
     ],
+    // 지수 선물 (24시간 무기한 선물 가격): hl = 하이퍼리퀴드 trade.xyz, gate = 게이트
+    indices: {
+      "@KR200": { n:"코스피200", sub:"KR200 · 선물", src:"hl",   id:"xyz:KR200",  dg:2, alias:"코스피 kospi kospi200 ks200" },
+      "@US30":  { n:"다우",      sub:"US30 · 선물",  src:"gate", id:"US30_USDT",  dg:0, alias:"다우존스 dow dji ym us30" },
+      "@NDX":   { n:"나스닥100", sub:"XYZ100 · 선물", src:"hl",  id:"xyz:XYZ100", dg:1, alias:"나스닥 nasdaq ndx nq nas100" },
+      "@SPX":   { n:"S&P500",    sub:"SP500 · 선물", src:"hl",   id:"xyz:SP500",  dg:2, alias:"에스앤피 sp500 spx es us500" },
+      "@N225":  { n:"니케이225", sub:"JP225 · 선물", src:"hl",   id:"xyz:JP225",  dg:0, alias:"니케이 닛케이 nikkei n225 jp225" }
+    },
     // 원화로 바꿔 보여줄 종목 (한국 주식). 설정에서 추가한 한국 주식은 자동으로 여기에 더해짐
     krw: ["SAMSUNG","SKHYNIX","HYUNDAI","NAVER","LGELECTRONICS","HANMI","SAMSUNGEM","KODEX200"],
     // 이름표: 기호 → [이름, 작은 설명]

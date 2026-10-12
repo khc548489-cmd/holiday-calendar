@@ -1245,11 +1245,12 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   /* ── 24시간 시세 (바이낸스 USDⓈ-M 무기한 선물) ── */
   var Q = D.quotes || {};
   Q.tabs = Q.tabs || []; Q.names = Q.names || {}; Q.krw = Q.krw || [];
+  var IDX = Q.indices || {};               // '@KR200' 같은 지수 선물
   var Q_PANEL_W = 263;                     // 패널 너비 + 경계선
   var Q_MAX = 30;                          // 탭 하나에 넣을 수 있는 종목 수
   var Q_API = 'https://fapi.binance.com/fapi/v1/';
   var Q_TYPE = { KR_EQUITY: '한국 상장', EQUITY: '미국 상장', HK_EQUITY: '홍콩 상장', CN_EQUITY: '중국 상장',
-                 COMMODITY: '원자재', FX: '외환', PREMARKET: '상장 전', COIN: '코인' };
+                 COMMODITY: '원자재', FX: '외환', PREMARKET: '상장 전', COIN: '코인', INDEX: '지수 선물' };
   var IC_UP = '<svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg>';
   var IC_X = '<svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 7L7 17"/></svg>';
   var qOn = store.get('quotes', true);
@@ -1264,7 +1265,16 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
     if (!qLists || typeof qLists !== 'object') qLists = {};
     for (var k in qLists) {
       if (!Array.isArray(qLists[k])) { delete qLists[k]; continue; }
-      qLists[k] = qLists[k].filter(function (b, i, a) { return /^[A-Z0-9]{1,20}$/.test(b) && a.indexOf(b) === i; }).slice(0, Q_MAX);
+      qLists[k] = qLists[k].filter(function (b, i, a) {
+        return (b.charAt(0) === '@' ? !!IDX[b] : /^[A-Z0-9]{1,20}$/.test(b)) && a.indexOf(b) === i;
+      }).slice(0, Q_MAX);
+    }
+    if (!store.get('qIdxV1', false)) {       // 지수 선물 생기기 전에 고쳐 둔 탭에도 기본 지수를 앞에 넣음 (한 번만)
+      Q.tabs.forEach(function (t) {
+        var l = qLists[t.id]; if (!Array.isArray(l) || l.some(function (b) { return b.charAt(0) === '@'; })) return;
+        qLists[t.id] = t.items.filter(function (b) { return b.charAt(0) === '@'; }).concat(l).slice(0, Q_MAX);
+      });
+      store.set('qLists', qLists); store.set('qIdxV1', true);
     }
     if (qCat && (typeof qCat !== 'object' || !qCat.f)) qCat = null;
     if (!Q.tabs.some(function (t) { return t.id === qTab; })) qTab = Q.tabs.length ? Q.tabs[0].id : 'all';
@@ -1283,14 +1293,18 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
     });
     return out;
   }
-  function qType(b) { return (qCat && qCat.f[b]) || (Q.krw.indexOf(b) >= 0 ? 'KR_EQUITY' : ''); }
+  function qType(b) { return IDX[b] ? 'INDEX' : (qCat && qCat.f[b]) || (Q.krw.indexOf(b) >= 0 ? 'KR_EQUITY' : ''); }
+  function qIsIdx(b) { return !!IDX[b]; }
+  function qBin(list) { return list.filter(function (b) { return b.charAt(0) !== '@'; }); }   // 바이낸스에서 받는 것만
   function qIsKrw(b) { return qType(b) === 'KR_EQUITY'; }
   function qName(b) {
+    if (IDX[b]) return { n: IDX[b].n, sub: IDX[b].sub };
     var n = Q.names[b];
     if (n) return { n: n[0], sub: n[1] || '' };
     return { n: b, sub: Q_TYPE[qType(b)] || '' };
   }
   function qSubFull(b, nm) {        // 편집 화면의 작은 글씨: 기호 · 설명
+    if (IDX[b]) return nm.sub + (IDX[b].src === 'hl' ? ' · 하이퍼리퀴드' : ' · 게이트');
     if (nm.sub && nm.sub.indexOf(b) >= 0) return nm.sub;
     var extra = nm.sub || Q_TYPE[qType(b)] || '';
     return extra ? b + ' · ' + extra : b;
@@ -1298,6 +1312,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 
   /* 가격 표시 */
   function qFmt(b, c) {
+    if (IDX[b]) return c.toLocaleString('en-US', { minimumFractionDigits: IDX[b].dg, maximumFractionDigits: IDX[b].dg });
     if (qIsKrw(b)) return fx && fx.k ? Math.round(c * fx.k).toLocaleString('ko-KR') : '$' + c.toFixed(2);
     if (c > 0 && c < 0.01) return String(+c.toPrecision(4));
     var dg = (qType(b) === 'FX' || c < 1) ? 4 : 2;
@@ -1306,14 +1321,17 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   function qPaint(b, flash) {
     var d = qData[b], r = qRows[b];
     if (!d || !r) return;
-    var prev = r.v;
-    r.px.textContent = qFmt(b, d.c); r.v = d.c;
+    var prev = r.v, prevTxt = r.px.textContent, txt = qFmt(b, d.c);
+    r.px.textContent = txt; r.v = d.c;
     var pct = d.o > 0 ? (d.c - d.o) / d.o * 100 : 0;
     var cls = pct > 0.004 ? 'up' : pct < -0.004 ? 'dn' : 'flat';
     r.ch.textContent = (cls === 'up' ? '+' : cls === 'dn' ? '−' : '') + Math.abs(pct).toFixed(2) + '%';
     r.ch.className = 'q-chg ' + cls;
-    r.el.title = qName(b).n + ' (' + b + 'USDT)\n$' + d.c + (qIsKrw(b) && fx && fx.k ? ' × ' + fx.k.toFixed(2) + '원' : '') + '\n24시간 전 $' + d.o;
-    if (flash && prev != null && prev !== d.c) {
+    r.el.title = IDX[b]
+      ? IDX[b].n + ' 지수 선물 (' + (IDX[b].src === 'hl' ? '하이퍼리퀴드 ' : '게이트 ') + IDX[b].id + ' 무기한 선물)\n지금 ' + qFmt(b, d.c) + ' · 24시간 전 ' + qFmt(b, d.o)
+      : qName(b).n + ' (' + b + 'USDT)\n$' + d.c + (qIsKrw(b) && fx && fx.k ? ' × ' + fx.k.toFixed(2) + '원' : '') + '\n24시간 전 $' + d.o;
+    if (flash && prev != null && txt !== prevTxt && Date.now() - (r.fl || 0) > 1200) {   // 보이는 숫자가 바뀔 때만, 1.2초에 한 번까지
+      r.fl = Date.now();
       var el = r.el;
       el.classList.remove('up-flash', 'dn-flash'); void el.offsetWidth;
       el.classList.add(d.c > prev ? 'up-flash' : 'dn-flash');
@@ -1335,7 +1353,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   }
   function qRenderList() {
     var list = qList(qTab), all = qTab === 'all';
-    var krw = list.filter(qIsKrw), usd = list.filter(function (b) { return !qIsKrw(b); });
+    var idx = list.filter(qIsIdx), krw = list.filter(qIsKrw), usd = list.filter(function (b) { return !qIsKrw(b) && !qIsIdx(b); });
     function rows(arr) {
       return arr.map(function (b) {
         var nm = qName(b);
@@ -1348,6 +1366,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
       var r = first ? '<span class="r">24시간 등락</span>' : ''; first = false;
       return '<div class="q-grp"><span>' + label + '</span>' + r + '</div>';
     }
+    if (idx.length) h += grp('지수 선물') + rows(idx);
     if (krw.length) h += grp(all ? '국내 · 원화 환산' : '원화 환산') + rows(krw);
     if (usd.length) h += grp(all ? '해외 · 달러' : '달러') + rows(usd);
     if (!list.length) h += '<div class="q-empty">이 탭에 넣은 종목이 없습니다.</div>';
@@ -1362,9 +1381,9 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   }
   function qCapHtml() {             // 목록 끝 작은 안내
     var def = qTabDef(qTab), ps;
-    if (qEdit) ps = ['바이낸스 무기한 선물에 있는 종목만 넣을 수 있습니다 (주식·ETF·원자재·코인).'];
+    if (qEdit) ps = ['지수 선물 5개(코스피200·다우·나스닥100·S&P500·니케이225)와 바이낸스 무기한 선물에 있는 종목을 넣을 수 있습니다.'];
     else {
-      ps = ['바이낸스 무기한 선물 가격 (거래소 시세 아님)'];
+      ps = ['24시간 무기한 선물 가격 (거래소 시세 아님)', '지수: 하이퍼리퀴드 · 다우는 게이트 / 종목: 바이낸스'];
       if (def.note) ps.push(def.note);
     }
     if (fx && fx.src === 'er') ps.push('환율: Rates By Exchange Rate API');
@@ -1392,19 +1411,23 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
     qRenderSug();
   }
   function qNorm(s) { return String(s || '').toLowerCase().replace(/[\s·.\-_/()]/g, ''); }
-  function qPool() { return qCat ? Object.keys(qCat.f) : Object.keys(Q.names); }
+  function qPool() { return Object.keys(IDX).concat(qCat ? Object.keys(qCat.f) : Object.keys(Q.names)); }
   function qSearch(q) {
     var qn = qNorm(q), qu = qn.toUpperCase(), res = [];
     if (!qn) return res;
     qPool().forEach(function (b) {
       var nm = qName(b), t = qType(b), coin = t === 'COIN', s = -1, n1 = qNorm(nm.n);
-      if (b === qu || n1 === qn) s = 100;
-      else if (b.indexOf(qu) === 0) s = 80;
+      var code = IDX[b] ? b.slice(1) : b;
+      var alias = IDX[b] ? String(IDX[b].alias || '').toLowerCase().split(/\s+/) : [];
+      if (code === qu || n1 === qn || alias.indexOf(qn) >= 0) s = 100;
+      else if (code.indexOf(qu) === 0) s = 80;
+      else if (alias.some(function (a) { return a.indexOf(qn) === 0; })) s = 78;
       else if (n1.indexOf(qn) === 0) s = 75;
       else if (n1.indexOf(qn) >= 0) s = 60;
       else if (!coin && (b.indexOf(qu) >= 0 || qNorm(nm.sub).indexOf(qn) >= 0 || qNorm(Q_TYPE[t]).indexOf(qn) >= 0)) s = 30;
       if (s < 0) return;
       if (coin) s -= 30;              // 코인은 주식·ETF 뒤로
+      if (IDX[b]) s += 3;             // 같은 이름이면 지수 선물을 먼저
       res.push({ b: b, s: s, l: n1.length });
     });
     res.sort(function (x, y) { return y.s - x.s || x.l - y.l || (x.b < y.b ? -1 : 1); });
@@ -1437,7 +1460,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
     qRender();
     qMsg(nm.n + ' 추가했습니다.', 'ok');
     $('qFind').focus();
-    if (!qData[b]) qFetchOne(b).then(function () { qLastT = Date.now(); qStatus(); }, function () {});
+    if (!qData[b] && !IDX[b]) qFetchOne(b).then(function () { qLastT = Date.now(); qStatus(); }, function () {});
   }
   function qTryRaw(raw) {
     var b = raw.trim().toUpperCase().replace(/USDT$/, '');
@@ -1468,9 +1491,10 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
       if (qWs && !qCovered()) { qCloseWs(); qConnect(); }   // 새로 넣은 종목까지 실시간으로
       var miss = qList(qTab).filter(function (b) { return !qData[b]; });
       if (miss.length && qOn) qSnapshot(miss);
+      if (qRunning) idxSync();                                // 지수 선물 목록이 바뀌었으면 다시 연결
     }
   }
-  function qCovered() { var have = ',' + qWsKey + ','; return qAllBases().every(function (b) { return have.indexOf(',' + b + ',') >= 0; }); }
+  function qCovered() { var have = ',' + qWsKey + ','; return qBin(qAllBases()).every(function (b) { return have.indexOf(',' + b + ',') >= 0; }); }
 
   $('qTabs').addEventListener('click', function (e) {
     var t = e.target.closest('button[data-t]'); if (!t) return;
@@ -1544,6 +1568,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   }
   function qSnapshot(bases) {
     var ok = 0;
+    bases = qBin(bases);
     return Promise.all(bases.map(function (b) { return qFetchOne(b).then(function () { ok++; }, function () {}); }))
       .then(function () {
         if (ok) qLastT = Date.now();
@@ -1570,7 +1595,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   function qCloseWs() { if (qWs) { var w = qWs; qWs = null; qWsKey = ''; try { w.close(); } catch (e) {} } }
   function qConnect() {
     if (!qOn || document.hidden || qWs) return;
-    var bases = qAllBases(); if (!bases.length) return;
+    var bases = qBin(qAllBases()); if (!bases.length) return;
     var ws, opened = false;
     try {
       ws = qWs = new WebSocket('wss://fstream.binance.com/market/stream?streams=' +
@@ -1599,12 +1624,102 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
       clearTimeout(qRetryT); qRetryT = setTimeout(qConnect, 60000);   // 1분 뒤 실시간 재연결
     };
   }
-  function qStop() { qStopPoll(); clearTimeout(qRetryT); qCloseWs(); qMode = 'idle'; }
+  function qStop() { qStopPoll(); clearTimeout(qRetryT); qCloseWs(); qMode = 'idle'; idxStop(); }
   function qStart() {
     qStop();
-    var first = qList(qTab), rest = qAllBases().filter(function (b) { return first.indexOf(b) < 0; });
+    var first = qBin(qList(qTab)), rest = qBin(qAllBases()).filter(function (b) { return first.indexOf(b) < 0; });
     qSnapshot(first).then(function () { if (rest.length) qSnapshot(rest); });
     qConnect();
+    idxSync();
+  }
+
+  /* ── 지수 선물 (24시간 무기한 선물): 하이퍼리퀴드 trade.xyz (코스피200·나스닥100·S&P500·니케이225), 게이트 (다우) ──
+     가격 = 무기한 선물의 마크 가격(mark), 등락 = 24시간 전 대비 */
+  var HL_API = 'https://api.hyperliquid.xyz/info', GT_API = 'https://api.gateio.ws/api/v4/futures/usdt/';
+  var hlWs = null, hlKey = '', hlPing = null, hlPollT = null, hlRetryT = null, gtT = null, gtRef = {}, gtRefT = 0, idxKey = '';
+  function idxWanted() { return qAllBases().filter(qIsIdx); }
+  function idxSet(b, c, o) {
+    if (!(c > 0)) return;
+    qData[b] = { c: c, o: o > 0 ? o : (qData[b] && qData[b].o) || c };
+    qPaint(b, true);
+  }
+  function idxStop() {
+    clearInterval(hlPing); clearInterval(hlPollT); clearTimeout(hlRetryT); clearInterval(gtT);
+    hlPing = hlPollT = hlRetryT = gtT = null;
+    if (hlWs) { var w = hlWs; hlWs = null; try { w.close(); } catch (e) {} }
+    hlKey = ''; idxKey = '';
+  }
+  function idxSync() {                       // 보고 있는 지수 선물이 바뀌었을 때만 다시 연결
+    var want = idxWanted(), key = want.join(',');
+    if (key === idxKey && (hlWs || hlPollT || gtT || !key)) return;
+    idxStop(); idxKey = key;
+    if (!want.length || !qOn || document.hidden) return;
+    var hl = want.filter(function (b) { return IDX[b].src === 'hl'; }), gt = want.filter(function (b) { return IDX[b].src === 'gate'; });
+    if (hl.length) { hlSnapshot(hl); hlConnect(hl); }
+    if (gt.length) { gtLoad(gt); gtT = setInterval(function () { gtLoad(gt); }, 5000); }
+  }
+  // 하이퍼리퀴드: 한 번에 받아 두고(REST) 실시간은 WebSocket(activeAssetCtx)
+  function hlSnapshot(list) {
+    var dexes = {};
+    list.forEach(function (b) { dexes[IDX[b].id.split(':')[0]] = 1; });
+    Object.keys(dexes).forEach(function (dex) {
+      fetch(HL_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'metaAndAssetCtxs', dex: dex }) })
+        .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+        .then(function (j) {
+          var by = {};
+          j[0].universe.forEach(function (u, i) { by[u.name] = j[1][i]; });
+          list.forEach(function (b) { var x = by[IDX[b].id]; if (x) idxSet(b, +x.markPx, +x.prevDayPx); });
+        }).catch(function () {});
+    });
+  }
+  function hlConnect(list) {
+    var ws;
+    try { ws = hlWs = new WebSocket('wss://api.hyperliquid.xyz/ws'); } catch (e) { hlFallback(list); return; }
+    hlKey = list.join(',');
+    var byCoin = {}; list.forEach(function (b) { byCoin[IDX[b].id] = b; });
+    var guard = setTimeout(function () { try { ws.close(); } catch (e) {} }, 10000);
+    ws.onopen = function () {
+      clearTimeout(guard);
+      if (hlWs !== ws) return;
+      list.forEach(function (b) { ws.send(JSON.stringify({ method: 'subscribe', subscription: { type: 'activeAssetCtx', coin: IDX[b].id } })); });
+      clearInterval(hlPing); hlPing = setInterval(function () { try { ws.send('{"method":"ping"}'); } catch (e) {} }, 45000);   // 60초 조용하면 끊김
+      clearInterval(hlPollT); hlPollT = null;
+    };
+    ws.onmessage = function (m) {
+      if (hlWs !== ws) return;
+      try {
+        var j = JSON.parse(m.data);
+        if (j.channel === 'activeAssetCtx' && j.data && byCoin[j.data.coin]) idxSet(byCoin[j.data.coin], +j.data.ctx.markPx, +j.data.ctx.prevDayPx);
+      } catch (e) {}
+    };
+    ws.onclose = function () {
+      clearTimeout(guard);
+      if (hlWs !== ws) return;
+      hlWs = null; clearInterval(hlPing); hlPing = null;
+      if (!qOn || document.hidden) return;
+      hlFallback(list);
+      clearTimeout(hlRetryT); hlRetryT = setTimeout(function () { if (!hlWs && qRunning) hlConnect(list); }, 60000);
+    };
+  }
+  function hlFallback(list) { if (!hlPollT) hlPollT = setInterval(function () { hlSnapshot(list); }, 5000); }
+  // 게이트(다우): 5초마다 마크 가격, 24시간 전 값은 1시간 봉으로 (10분마다)
+  function gtLoad(list) {
+    list.forEach(function (b) {
+      var id = IDX[b].id;
+      fetch(GT_API + 'tickers?contract=' + encodeURIComponent(id), { cache: 'no-store' })
+        .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+        .then(function (j) { var t = j && j[0]; if (t) idxSet(b, +t.mark_price, gtRef[b]); })
+        .catch(function () {});
+      if (!gtRef[b] || Date.now() - gtRefT > 10 * 60 * 1000) {
+        fetch(GT_API + 'candlesticks?contract=mark_' + encodeURIComponent(id) + '&interval=1h&limit=25', { cache: 'no-store' })
+          .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+          .then(function (c) {
+            if (!Array.isArray(c) || !c.length) return;
+            gtRef[b] = +c[0].o; gtRefT = Date.now();
+            if (qData[b]) idxSet(b, qData[b].c, gtRef[b]);
+          }).catch(function () {});
+      }
+    });
   }
 
   /* ── 환율: Coinbase 공개 환율(1분마다) → 안 되면 ExchangeRate-API(하루 1회) ──
